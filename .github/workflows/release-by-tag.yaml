@@ -1,0 +1,61 @@
+---
+name: Auto release/tag repo
+on:
+  workflow_dispatch:
+    inputs:
+      release-type:
+        required: true
+        type: choice
+        options:
+        - "release-candidate"
+        - "general-availability"
+        default: "release-candidate"
+        description: Kind of release to process
+      commit-sha:
+        required: true
+        type: string
+        description: Commit SHA to promote
+
+permissions:
+    contents: write
+    id-token: write
+    packages: write
+
+jobs:
+  auto-release:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        ref: ${{ inputs.commit-sha }}
+        token: ${{ secrets.ADMIN_TOKEN }}
+    - uses: arduino/setup-task@v2
+      with:
+        version: 3.x
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+    - name: Install svu
+      run: |
+        echo 'deb [trusted=yes] https://apt.fury.io/caarlos0/ /' | sudo tee /etc/apt/sources.list.d/caarlos0.list
+        sudo apt update
+        sudo apt install svu
+    - id: detect-bump
+      run: |
+        if [[ "${{ inputs.release-type }}" == "release-candidate" ]]
+        then
+          TAG=$(task prerelease)
+          echo "TAG=$TAG" >> $GITHUB_OUTPUT
+        elif [[ "${{ inputs.release-type }}" == "general-availability" ]]
+        then
+          TAG=$(task release)
+          echo "TAG=$TAG" >> $GITHUB_OUTPUT
+        fi
+    - name: Setup Git author information
+      run: |
+        set -ue
+        git config --global user.email "ci@ixxel.com"
+        git config --global user.name "CI"
+    - name: tag commit
+      run: |
+        git tag -a ${{ steps.detect-bump.outputs.TAG }} ${{ inputs.commit-sha }} -m "CI auto tag"
+        git push origin ${{ steps.detect-bump.outputs.TAG }}
